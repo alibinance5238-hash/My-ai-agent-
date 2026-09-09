@@ -18,7 +18,8 @@ jobs:
 
       - name: Find Android project
         run: |
-          SETTINGS=$(find extracted -name settings.gradle -o -name settings.gradle.kts | head -1)
+          SETTINGS=$(find extracted \( -name settings.gradle -o -name settings.gradle.kts \) | head -1)
+
           if [ -z "$SETTINGS" ]; then
             echo "ERROR: settings.gradle not found"
             find extracted -maxdepth 5 -type f | head -100
@@ -28,6 +29,21 @@ jobs:
           PROJECT_DIR=$(dirname "$SETTINGS")
           echo "Android project found at: $PROJECT_DIR"
           echo "PROJECT_DIR=$PROJECT_DIR" >> $GITHUB_ENV
+
+      - name: Fix Gradle repository conflict
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          echo "Checking build.gradle..."
+
+          if [ -f build.gradle ]; then
+            sed -i '/^[[:space:]]*repositories[[:space:]]*{/,/^[[:space:]]*}/d' build.gradle
+          fi
+
+          if [ -f build.gradle.kts ]; then
+            sed -i '/^[[:space:]]*repositories[[:space:]]*{/,/^[[:space:]]*}/d' build.gradle.kts
+          fi
+
+          echo "Repository conflict fix applied."
 
       - name: Setup Java
         uses: actions/setup-java@v4
