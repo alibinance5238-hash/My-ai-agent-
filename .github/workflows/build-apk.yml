@@ -46,8 +46,15 @@ jobs:
           p.write_text(text)
 
           print("Removed conflicting allprojects repositories.")
-          print("Kept buildscript repositories for Google and Maven Central.")
+          print("Kept buildscript repositories.")
           PY
+
+      - name: Enable AndroidX
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          touch gradle.properties
+          echo "android.useAndroidX=true" >> gradle.properties
+          echo "android.enableJetifier=true" >> gradle.properties
 
       - name: Setup Java
         uses: actions/setup-java@v4
