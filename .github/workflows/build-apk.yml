@@ -28,22 +28,26 @@ jobs:
 
           PROJECT_DIR=$(dirname "$SETTINGS")
           echo "Android project found at: $PROJECT_DIR"
-          echo "PROJECT_DIR=$PROJECT_DIR" >> $GITHUB_ENV
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-      - name: Fix Gradle repository conflict
+      - name: Fix Gradle repositories
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
-          echo "Checking build.gradle..."
+          python3 - <<'PY'
+          from pathlib import Path
 
-          if [ -f build.gradle ]; then
-            sed -i '/^[[:space:]]*repositories[[:space:]]*{/,/^[[:space:]]*}/d' build.gradle
-          fi
+          p = Path("build.gradle")
+          text = p.read_text()
 
-          if [ -f build.gradle.kts ]; then
-            sed -i '/^[[:space:]]*repositories[[:space:]]*{/,/^[[:space:]]*}/d' build.gradle.kts
-          fi
+          start = text.find("allprojects {")
+          if start != -1:
+              text = text[:start].rstrip() + "\n"
 
-          echo "Repository conflict fix applied."
+          p.write_text(text)
+
+          print("Removed conflicting allprojects repositories.")
+          print("Kept buildscript repositories for Google and Maven Central.")
+          PY
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -53,6 +57,8 @@ jobs:
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
 
       - name: Build APK
         working-directory: ${{ env.PROJECT_DIR }}
