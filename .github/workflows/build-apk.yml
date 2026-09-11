@@ -30,31 +30,11 @@ jobs:
           echo "Android project found at: $PROJECT_DIR"
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-      - name: Fix Gradle repositories
+      - name: Verify AndroidX
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          p = Path("build.gradle")
-          text = p.read_text()
-
-          start = text.find("allprojects {")
-          if start != -1:
-              text = text[:start].rstrip() + "\n"
-
-          p.write_text(text)
-
-          print("Removed conflicting allprojects repositories.")
-          print("Kept buildscript repositories.")
-          PY
-
-      - name: Enable AndroidX
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: |
-          touch gradle.properties
-          echo "android.useAndroidX=true" >> gradle.properties
-          echo "android.enableJetifier=true" >> gradle.properties
+          echo "Checking gradle.properties..."
+          cat gradle.properties
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -69,7 +49,8 @@ jobs:
 
       - name: Build APK
         working-directory: ${{ env.PROJECT_DIR }}
-        run: gradle assembleDebug --no-daemon
+        run: |
+          gradle assembleDebug --no-daemon
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
