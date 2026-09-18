@@ -25,165 +25,174 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Find and extract AgentApp ZIP
+      - name: Locate AgentApp ZIP
         shell: bash
         run: |
           set -e
 
-          echo "======================================"
-          echo "Searching for AgentApp ZIP..."
-          echo "======================================"
+          echo "Searching repository for ZIP..."
 
-          ZIP_FILE=""
-
-          # First look for the expected ZIP name
-          FOUND="$(find . -type f -name 'AgentApp-APK-Ready.zip' -not -path './.git/*' | head -n 1)"
-
-          if [ -n "$FOUND" ]; then
-            ZIP_FILE="$FOUND"
-          else
-            # If the name is different, look for any ZIP
-            FOUND="$(find . -type f -name '*.zip' -not -path './.git/*' | head -n 1)"
-
-            if [ -n "$FOUND" ]; then
-              ZIP_FILE="$FOUND"
-            fi
-          fi
+          ZIP_FILE=$(find . -type f -iname "*.zip" \
+            -not -path "./.git/*" \
+            | head -n 1)
 
           if [ -z "$ZIP_FILE" ]; then
-            echo "ERROR: No AgentApp ZIP file was found."
+            echo "ERROR: No ZIP file found."
             echo ""
-            echo "Files in repository:"
-            find . -maxdepth 4 -type f -not -path './.git/*' | sort
+            echo "Repository files:"
+            find . -maxdepth 5 -type f -not -path "./.git/*" | sort
             exit 1
           fi
 
-          echo "ZIP found:"
+          echo "ZIP FOUND:"
           echo "$ZIP_FILE"
 
-          mkdir -p extracted
+          echo "ZIP_FILE=$ZIP_FILE" >> "$GITHUB_ENV"
 
-          echo ""
-          echo "Extracting ZIP..."
-          unzip -o "$ZIP_FILE" -d extracted
-
-          echo ""
-          echo "Extracted files:"
-          find extracted -maxdepth 5 -type f | sort | head -300
-
-      - name: Find Android Gradle project
+      - name: Extract AgentApp
         shell: bash
         run: |
           set -e
 
-          echo "======================================"
-          echo "Searching for Android Gradle project..."
-          echo "======================================"
+          rm -rf extracted
+          mkdir -p extracted
+
+          echo "Extracting:"
+          echo "$ZIP_FILE"
+
+          unzip -q -o "$ZIP_FILE" -d extracted
+
+          echo ""
+          echo "========== EXTRACTED STRUCTURE =========="
+
+          find extracted -maxdepth 8 -type f \
+            -not -path "*/.git/*" \
+            | sort
+
+      - name: Locate Gradle project
+        shell: bash
+        run: |
+          set -e
+
+          echo ""
+          echo "========== SEARCHING GRADLE PROJECT =========="
 
           PROJECT_DIR=""
 
-          while IFS= read -r settings_file; do
-            DIR="$(dirname "$settings_file")"
+          # Look for settings.gradle / settings.gradle.kts
+          while IFS= read -r SETTINGS; do
+            DIR="$(dirname "$SETTINGS")"
+
+            echo "Checking:"
+            echo "$DIR"
 
             if [ -f "$DIR/build.gradle" ] || \
                [ -f "$DIR/build.gradle.kts" ]; then
+
               PROJECT_DIR="$DIR"
               break
             fi
-          done < <(find extracted -type f \( \
-            -name "settings.gradle" \
-            -o -name "settings.gradle.kts" \
-          \) | sort)
+          done < <(
+            find extracted -type f \
+              \( -name "settings.gradle" -o -name "settings.gradle.kts" \) \
+              | sort
+          )
 
-          # Fallback: search for build.gradle if settings file wasn't found
+          # If settings.gradle is absent, find an Android build.gradle
           if [ -z "$PROJECT_DIR" ]; then
-            BUILD_FILE="$(find extracted -type f \( \
-              -name "build.gradle" \
-              -o -name "build.gradle.kts" \
-            \) | head -n 1)"
 
-            if [ -n "$BUILD_FILE" ]; then
-              PROJECT_DIR="$(dirname "$BUILD_FILE")"
-            fi
+            while IFS= read -r BUILD_FILE; do
+
+              DIR="$(dirname "$BUILD_FILE")"
+
+              if [ -f "$DIR/gradlew" ] || \
+                 [ -f "$DIR/settings.gradle" ] || \
+                 [ -f "$DIR/settings.gradle.kts" ]; then
+
+                PROJECT_DIR="$DIR"
+                break
+              fi
+
+            done < <(
+              find extracted -type f \
+                \( -name "build.gradle" -o -name "build.gradle.kts" \) \
+                | sort
+            )
+
           fi
 
           if [ -z "$PROJECT_DIR" ]; then
-            echo "ERROR: Android Gradle project was not found after extraction."
             echo ""
-            echo "Extracted structure:"
-            find extracted -maxdepth 6 -type f | sort
+            echo "ERROR: Android Gradle project NOT FOUND."
+            echo ""
+            echo "The extracted ZIP contains:"
+            find extracted -maxdepth 10 -type f | sort
             exit 1
           fi
 
-          echo "Android project found:"
+          echo ""
+          echo "======================================"
+          echo "ANDROID PROJECT FOUND:"
           echo "$PROJECT_DIR"
+          echo "======================================"
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-      - name: Check Android project
+      - name: Verify project
         shell: bash
         run: |
           set -e
 
-          echo "======================================"
-          echo "PROJECT: $PROJECT_DIR"
-          echo "======================================"
+          echo "Project:"
+          echo "$PROJECT_DIR"
 
           echo ""
-          echo "Project files:"
+          echo "Files:"
           ls -la "$PROJECT_DIR"
 
           echo ""
-          echo "Gradle files:"
+          echo "Gradle configuration:"
           find "$PROJECT_DIR" -maxdepth 3 -type f \
             \( \
-              -name "build.gradle" \
-              -o -name "build.gradle.kts" \
-              -o -name "settings.gradle" \
+              -name "settings.gradle" \
               -o -name "settings.gradle.kts" \
+              -o -name "build.gradle" \
+              -o -name "build.gradle.kts" \
+              -o -name "gradlew" \
               -o -name "gradle-wrapper.properties" \
             \) \
             -print
 
-      - name: Prepare Gradle
+      - name: Build APK
         shell: bash
-        run: |
-          set -e
-
-          if [ -f "$PROJECT_DIR/gradlew" ]; then
-            echo "Gradle wrapper found."
-            chmod +x "$PROJECT_DIR/gradlew"
-          else
-            echo "No Gradle wrapper found."
-            echo "Using installed Gradle."
-
-            gradle --version
-          fi
-
-      - name: Build Debug APK
         working-directory: ${{ env.PROJECT_DIR }}
-        shell: bash
         run: |
           set -e
 
           echo "======================================"
-          echo "BUILDING DEBUG APK"
+          echo "STARTING ANDROID BUILD"
           echo "======================================"
 
           if [ -f "./gradlew" ]; then
             chmod +x ./gradlew
             ./gradlew assembleDebug --no-daemon --stacktrace
           else
+            echo "Gradle wrapper not found."
+            echo "Installing Gradle 8.7..."
+
+            wget -q https://services.gradle.org/distributions/gradle-8.7-bin.zip
+            unzip -q gradle-8.7-bin.zip
+            export PATH="$PWD/gradle-8.7/bin:$PATH"
+
+            gradle --version
             gradle assembleDebug --no-daemon --stacktrace
           fi
 
       - name: Find APK
         shell: bash
         run: |
-          set -e
-
           echo "======================================"
-          echo "SEARCHING FOR APK"
+          echo "APK FILES"
           echo "======================================"
 
           find "$PROJECT_DIR" \
@@ -196,5 +205,5 @@ jobs:
         with:
           name: Agent-Debug-APK
           path: |
-            ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/*.apk
+            ${{ env.PROJECT_DIR }}/**/build/outputs/apk/debug/*.apk
           if-no-files-found: error
