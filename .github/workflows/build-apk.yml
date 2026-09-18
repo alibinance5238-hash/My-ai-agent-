@@ -7,18 +7,14 @@ on:
       - main
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
     name: Build Debug APK
     runs-on: ubuntu-latest
 
-    env:
-      PROJECT_DIR: extracted/AgentApp
-
     steps:
-
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -27,35 +23,92 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+          cache: gradle
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.7'
+      - name: Find Android project
+        id: find_project
+        shell: bash
+        run: |
+          echo "Searching for Android Gradle project..."
+
+          PROJECT_DIR=""
+
+          while IFS= read -r settings_file; do
+            DIR="$(dirname "$settings_file")"
+
+            if [ -f "$DIR/gradlew" ] || \
+               [ -f "$DIR/build.gradle" ] || \
+               [ -f "$DIR/build.gradle.kts" ]; then
+              PROJECT_DIR="$DIR"
+              break
+            fi
+          done < <(find . -type f \( \
+            -name "settings.gradle" \
+            -o -name "settings.gradle.kts" \
+          \) -not -path "./.git/*" | sort)
+
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "ERROR: Android Gradle project was not found."
+            echo "Repository structure:"
+            find . -maxdepth 4 -type f | sort
+            exit 1
+          fi
+
+          PROJECT_DIR="${PROJECT_DIR#./}"
+
+          echo "Android project found at:"
+          echo "$PROJECT_DIR"
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
       - name: Check project
         run: |
-          echo "Project directory:"
+          echo "======================================"
+          echo "Project directory: $PROJECT_DIR"
+          echo "======================================"
+
           ls -la "$PROJECT_DIR"
+
           echo ""
           echo "Gradle files:"
-          find "$PROJECT_DIR" -maxdepth 2 -type f \
-            \( -name "build.gradle" -o -name "build.gradle.kts" -o -name "settings.gradle" -o -name "settings.gradle.kts" \) \
+          find "$PROJECT_DIR" -maxdepth 3 -type f \
+            \( \
+              -name "build.gradle" \
+              -o -name "build.gradle.kts" \
+              -o -name "settings.gradle" \
+              -o -name "settings.gradle.kts" \
+            \) \
             -print
+
+      - name: Make Gradle wrapper executable
+        run: |
+          if [ -f "$PROJECT_DIR/gradlew" ]; then
+            chmod +x "$PROJECT_DIR/gradlew"
+          fi
 
       - name: Build APK
         working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
         run: |
-          gradle assembleDebug --no-daemon --stacktrace
+          if [ -f "./gradlew" ]; then
+            ./gradlew assembleDebug --no-daemon --stacktrace
+          else
+            gradle assembleDebug --no-daemon --stacktrace
+          fi
 
       - name: Find APK
         run: |
           echo "Searching for APK..."
-          find "$PROJECT_DIR" -type f -name "*.apk" -print
+
+          find "$PROJECT_DIR" \
+            -type f \
+            -name "*.apk" \
+            -print
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Agent-Debug-APK
-          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/*.apk
+          path: |
+            ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
