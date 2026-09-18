@@ -15,58 +15,122 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
-          cache: gradle
 
-      - name: Find Android project
-        id: find_project
+      - name: Find and extract AgentApp ZIP
         shell: bash
         run: |
+          set -e
+
+          echo "======================================"
+          echo "Searching for AgentApp ZIP..."
+          echo "======================================"
+
+          ZIP_FILE=""
+
+          # First look for the expected ZIP name
+          FOUND="$(find . -type f -name 'AgentApp-APK-Ready.zip' -not -path './.git/*' | head -n 1)"
+
+          if [ -n "$FOUND" ]; then
+            ZIP_FILE="$FOUND"
+          else
+            # If the name is different, look for any ZIP
+            FOUND="$(find . -type f -name '*.zip' -not -path './.git/*' | head -n 1)"
+
+            if [ -n "$FOUND" ]; then
+              ZIP_FILE="$FOUND"
+            fi
+          fi
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ERROR: No AgentApp ZIP file was found."
+            echo ""
+            echo "Files in repository:"
+            find . -maxdepth 4 -type f -not -path './.git/*' | sort
+            exit 1
+          fi
+
+          echo "ZIP found:"
+          echo "$ZIP_FILE"
+
+          mkdir -p extracted
+
+          echo ""
+          echo "Extracting ZIP..."
+          unzip -o "$ZIP_FILE" -d extracted
+
+          echo ""
+          echo "Extracted files:"
+          find extracted -maxdepth 5 -type f | sort | head -300
+
+      - name: Find Android Gradle project
+        shell: bash
+        run: |
+          set -e
+
+          echo "======================================"
           echo "Searching for Android Gradle project..."
+          echo "======================================"
 
           PROJECT_DIR=""
 
           while IFS= read -r settings_file; do
             DIR="$(dirname "$settings_file")"
 
-            if [ -f "$DIR/gradlew" ] || \
-               [ -f "$DIR/build.gradle" ] || \
+            if [ -f "$DIR/build.gradle" ] || \
                [ -f "$DIR/build.gradle.kts" ]; then
               PROJECT_DIR="$DIR"
               break
             fi
-          done < <(find . -type f \( \
+          done < <(find extracted -type f \( \
             -name "settings.gradle" \
             -o -name "settings.gradle.kts" \
-          \) -not -path "./.git/*" | sort)
+          \) | sort)
+
+          # Fallback: search for build.gradle if settings file wasn't found
+          if [ -z "$PROJECT_DIR" ]; then
+            BUILD_FILE="$(find extracted -type f \( \
+              -name "build.gradle" \
+              -o -name "build.gradle.kts" \
+            \) | head -n 1)"
+
+            if [ -n "$BUILD_FILE" ]; then
+              PROJECT_DIR="$(dirname "$BUILD_FILE")"
+            fi
+          fi
 
           if [ -z "$PROJECT_DIR" ]; then
-            echo "ERROR: Android Gradle project was not found."
-            echo "Repository structure:"
-            find . -maxdepth 4 -type f | sort
+            echo "ERROR: Android Gradle project was not found after extraction."
+            echo ""
+            echo "Extracted structure:"
+            find extracted -maxdepth 6 -type f | sort
             exit 1
           fi
 
-          PROJECT_DIR="${PROJECT_DIR#./}"
-
-          echo "Android project found at:"
+          echo "Android project found:"
           echo "$PROJECT_DIR"
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-      - name: Check project
+      - name: Check Android project
+        shell: bash
         run: |
+          set -e
+
           echo "======================================"
-          echo "Project directory: $PROJECT_DIR"
+          echo "PROJECT: $PROJECT_DIR"
           echo "======================================"
 
+          echo ""
+          echo "Project files:"
           ls -la "$PROJECT_DIR"
 
           echo ""
@@ -77,28 +141,50 @@ jobs:
               -o -name "build.gradle.kts" \
               -o -name "settings.gradle" \
               -o -name "settings.gradle.kts" \
+              -o -name "gradle-wrapper.properties" \
             \) \
             -print
 
-      - name: Make Gradle wrapper executable
+      - name: Prepare Gradle
+        shell: bash
         run: |
+          set -e
+
           if [ -f "$PROJECT_DIR/gradlew" ]; then
+            echo "Gradle wrapper found."
             chmod +x "$PROJECT_DIR/gradlew"
+          else
+            echo "No Gradle wrapper found."
+            echo "Using installed Gradle."
+
+            gradle --version
           fi
 
-      - name: Build APK
+      - name: Build Debug APK
         working-directory: ${{ env.PROJECT_DIR }}
         shell: bash
         run: |
+          set -e
+
+          echo "======================================"
+          echo "BUILDING DEBUG APK"
+          echo "======================================"
+
           if [ -f "./gradlew" ]; then
+            chmod +x ./gradlew
             ./gradlew assembleDebug --no-daemon --stacktrace
           else
             gradle assembleDebug --no-daemon --stacktrace
           fi
 
       - name: Find APK
+        shell: bash
         run: |
-          echo "Searching for APK..."
+          set -e
+
+          echo "======================================"
+          echo "SEARCHING FOR APK"
+          echo "======================================"
 
           find "$PROJECT_DIR" \
             -type f \
