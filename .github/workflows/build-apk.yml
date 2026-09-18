@@ -25,166 +25,126 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Locate AgentApp ZIP
+      - name: Extract AgentApp ZIP
         shell: bash
         run: |
           set -e
 
-          echo "Searching repository for ZIP..."
+          echo "======================================"
+          echo "FINDING ZIP"
+          echo "======================================"
 
           ZIP_FILE=$(find . -type f -iname "*.zip" \
             -not -path "./.git/*" \
             | head -n 1)
 
           if [ -z "$ZIP_FILE" ]; then
-            echo "ERROR: No ZIP file found."
-            echo ""
-            echo "Repository files:"
-            find . -maxdepth 5 -type f -not -path "./.git/*" | sort
+            echo "ERROR: ZIP file not found."
             exit 1
           fi
 
-          echo "ZIP FOUND:"
+          echo "ZIP:"
           echo "$ZIP_FILE"
-
-          echo "ZIP_FILE=$ZIP_FILE" >> "$GITHUB_ENV"
-
-      - name: Extract AgentApp
-        shell: bash
-        run: |
-          set -e
 
           rm -rf extracted
           mkdir -p extracted
 
-          echo "Extracting:"
-          echo "$ZIP_FILE"
-
-          unzip -q -o "$ZIP_FILE" -d extracted
+          unzip -o "$ZIP_FILE" -d extracted
 
           echo ""
-          echo "========== EXTRACTED STRUCTURE =========="
+          echo "======================================"
+          echo "EXTRACTED CONTENT"
+          echo "======================================"
 
-          find extracted -maxdepth 8 -type f \
-            -not -path "*/.git/*" \
-            | sort
+          find extracted -maxdepth 8 -type f | sort
 
-      - name: Locate Gradle project
+      - name: Locate AgentApp folder
         shell: bash
         run: |
           set -e
 
-          echo ""
-          echo "========== SEARCHING GRADLE PROJECT =========="
+          echo "======================================"
+          echo "LOCATING AGENTAPP"
+          echo "======================================"
 
-          PROJECT_DIR=""
+          AGENT_DIR=$(find extracted -type d -name "AgentApp" | head -n 1)
 
-          # Look for settings.gradle / settings.gradle.kts
-          while IFS= read -r SETTINGS; do
-            DIR="$(dirname "$SETTINGS")"
+          if [ -z "$AGENT_DIR" ]; then
+            echo "AgentApp folder not found."
 
-            echo "Checking:"
-            echo "$DIR"
-
-            if [ -f "$DIR/build.gradle" ] || \
-               [ -f "$DIR/build.gradle.kts" ]; then
-
-              PROJECT_DIR="$DIR"
-              break
-            fi
-          done < <(
-            find extracted -type f \
-              \( -name "settings.gradle" -o -name "settings.gradle.kts" \) \
-              | sort
-          )
-
-          # If settings.gradle is absent, find an Android build.gradle
-          if [ -z "$PROJECT_DIR" ]; then
-
-            while IFS= read -r BUILD_FILE; do
-
-              DIR="$(dirname "$BUILD_FILE")"
-
-              if [ -f "$DIR/gradlew" ] || \
-                 [ -f "$DIR/settings.gradle" ] || \
-                 [ -f "$DIR/settings.gradle.kts" ]; then
-
-                PROJECT_DIR="$DIR"
-                break
-              fi
-
-            done < <(
-              find extracted -type f \
-                \( -name "build.gradle" -o -name "build.gradle.kts" \) \
-                | sort
-            )
-
-          fi
-
-          if [ -z "$PROJECT_DIR" ]; then
             echo ""
-            echo "ERROR: Android Gradle project NOT FOUND."
-            echo ""
-            echo "The extracted ZIP contains:"
-            find extracted -maxdepth 10 -type f | sort
+            echo "Folders found:"
+            find extracted -type d | sort
+
             exit 1
           fi
 
-          echo ""
-          echo "======================================"
-          echo "ANDROID PROJECT FOUND:"
-          echo "$PROJECT_DIR"
-          echo "======================================"
+          echo "AgentApp found at:"
+          echo "$AGENT_DIR"
 
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "PROJECT_DIR=$AGENT_DIR" >> "$GITHUB_ENV"
 
-      - name: Verify project
+      - name: Show AgentApp structure
         shell: bash
         run: |
           set -e
 
-          echo "Project:"
-          echo "$PROJECT_DIR"
+          echo "======================================"
+          echo "AGENTAPP STRUCTURE"
+          echo "======================================"
 
-          echo ""
-          echo "Files:"
           ls -la "$PROJECT_DIR"
 
           echo ""
-          echo "Gradle configuration:"
-          find "$PROJECT_DIR" -maxdepth 3 -type f \
+          echo "Important files:"
+          find "$PROJECT_DIR" -maxdepth 4 -type f \
             \( \
-              -name "settings.gradle" \
-              -o -name "settings.gradle.kts" \
-              -o -name "build.gradle" \
+              -name "build.gradle" \
               -o -name "build.gradle.kts" \
+              -o -name "settings.gradle" \
+              -o -name "settings.gradle.kts" \
               -o -name "gradlew" \
-              -o -name "gradle-wrapper.properties" \
+              -o -name "AndroidManifest.xml" \
             \) \
             -print
 
-      - name: Build APK
+      - name: Prepare Gradle
+        shell: bash
+        run: |
+          set -e
+
+          if [ -f "$PROJECT_DIR/gradlew" ]; then
+            echo "Gradle wrapper found."
+            chmod +x "$PROJECT_DIR/gradlew"
+          else
+            echo "Gradle wrapper not found."
+            echo "Installing Gradle 8.7..."
+
+            cd "$PROJECT_DIR"
+
+            wget -q \
+              https://services.gradle.org/distributions/gradle-8.7-bin.zip
+
+            unzip -q gradle-8.7-bin.zip
+
+            echo "GRADLE_HOME=$PWD/gradle-8.7" >> "$GITHUB_ENV"
+            echo "$PWD/gradle-8.7/bin" >> "$GITHUB_PATH"
+          fi
+
+      - name: Build Debug APK
         shell: bash
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
           set -e
 
           echo "======================================"
-          echo "STARTING ANDROID BUILD"
+          echo "BUILDING APK"
           echo "======================================"
 
           if [ -f "./gradlew" ]; then
             chmod +x ./gradlew
             ./gradlew assembleDebug --no-daemon --stacktrace
           else
-            echo "Gradle wrapper not found."
-            echo "Installing Gradle 8.7..."
-
-            wget -q https://services.gradle.org/distributions/gradle-8.7-bin.zip
-            unzip -q gradle-8.7-bin.zip
-            export PATH="$PWD/gradle-8.7/bin:$PATH"
-
-            gradle --version
             gradle assembleDebug --no-daemon --stacktrace
           fi
 
@@ -192,7 +152,7 @@ jobs:
         shell: bash
         run: |
           echo "======================================"
-          echo "APK FILES"
+          echo "SEARCHING FOR APK"
           echo "======================================"
 
           find "$PROJECT_DIR" \
@@ -205,5 +165,5 @@ jobs:
         with:
           name: Agent-Debug-APK
           path: |
-            ${{ env.PROJECT_DIR }}/**/build/outputs/apk/debug/*.apk
+            ${{ env.PROJECT_DIR }}/**/*.apk
           if-no-files-found: error
