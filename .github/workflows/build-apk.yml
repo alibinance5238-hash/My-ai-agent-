@@ -38,10 +38,14 @@ jobs:
           echo "EXTRACTING ANDROID PROJECT"
           echo "======================================"
 
-          ZIP="My-ai-agent-GITHUB-READY-FIXED.zip"
+          ZIP="My-ai-agent-GITHUB-READY-FIXED-V2.zip"
 
           if [ ! -f "$ZIP" ]; then
-            echo "ERROR: ZIP file not found: $ZIP"
+            echo "ERROR: ZIP file not found:"
+            echo "$ZIP"
+            echo ""
+            echo "Files in repository:"
+            ls -la
             exit 1
           fi
 
@@ -51,8 +55,8 @@ jobs:
           unzip -o "$ZIP" -d android-project
 
           echo ""
-          echo "Extracted files:"
-          find android-project -maxdepth 4 -type f | sort
+          echo "Android project files:"
+          find android-project -maxdepth 5 -type f | sort
 
       - name: Verify Android project
         shell: bash
@@ -60,7 +64,7 @@ jobs:
           set -e
 
           echo "======================================"
-          echo "CHECKING ANDROID PROJECT"
+          echo "VERIFYING ANDROID PROJECT"
           echo "======================================"
 
           cd android-project
@@ -71,8 +75,32 @@ jobs:
           test -f "app/src/main/AndroidManifest.xml"
 
           echo ""
-          echo "All required Android files found."
-          echo "Project structure is OK."
+          echo "Android project found successfully."
+
+      - name: Fix GeminiClient Kotlin syntax
+        shell: bash
+        run: |
+          set -e
+
+          echo "======================================"
+          echo "FIXING GEMINI CLIENT"
+          echo "======================================"
+
+          FILE="android-project/app/src/main/java/com/user/agentapp/GeminiClient.kt"
+
+          if [ ! -f "$FILE" ]; then
+            echo "ERROR: GeminiClient.kt not found."
+            exit 1
+          fi
+
+          echo "Before fix:"
+          nl -ba "$FILE" | sed -n '66,74p'
+
+          sed -i 's/NO_WRAP))))/NO_WRAP)))/g' "$FILE"
+
+          echo ""
+          echo "After fix:"
+          nl -ba "$FILE" | sed -n '66,74p'
 
       - name: Build Debug APK
         shell: bash
