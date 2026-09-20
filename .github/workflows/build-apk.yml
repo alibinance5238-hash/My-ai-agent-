@@ -22,142 +22,42 @@ jobs:
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: "17"
 
       - name: Set up Gradle 8.2
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.2'
+          gradle-version: "8.2"
 
-      - name: Extract Android project
+      - name: Check Android project
         shell: bash
         run: |
           set -e
 
           echo "======================================"
-          echo "EXTRACTING ANDROID PROJECT"
+          echo "CHECKING ANDROID PROJECT"
           echo "======================================"
 
-          ZIP="My-ai-agent-GITHUB-READY-FIXED-V2.zip"
+          echo "Repository:"
+          ls -la
 
-          if [ ! -f "$ZIP" ]; then
-            echo "ERROR: ZIP NOT FOUND"
-            echo "Files in repository:"
-            ls -la
-            exit 1
-          fi
-
-          rm -rf android-project
-          mkdir -p android-project
-
-          unzip -o "$ZIP" -d android-project
+          test -f "settings.gradle"
+          test -f "build.gradle"
+          test -f "app/build.gradle"
+          test -f "app/src/main/AndroidManifest.xml"
 
           echo ""
-          echo "Extracted files:"
-          find android-project -maxdepth 4 -type f | sort
+          echo "ANDROID PROJECT FOUND"
+          echo "======================================"
 
-      - name: Find Android project
+      - name: Show Gemini source
         shell: bash
         run: |
           set -e
 
-          echo "======================================"
-          echo "FINDING ANDROID PROJECT"
-          echo "======================================"
-
-          if [ -f "android-project/settings.gradle" ]; then
-            echo "Android project found."
-          elif [ -f "android-project/AgentApp/settings.gradle" ]; then
-            echo "Android project found inside AgentApp."
-            mv android-project/AgentApp/* android-project/
-            mv android-project/AgentApp/.[!.]* android-project/ 2>/dev/null || true
-            rmdir android-project/AgentApp 2>/dev/null || true
-          else
-            echo "ERROR: settings.gradle not found."
-            find android-project -name "settings.gradle" -print
-            exit 1
-          fi
-
-      - name: Verify Android project
-        shell: bash
-        run: |
-          set -e
-
-          echo "======================================"
-          echo "VERIFYING ANDROID PROJECT"
-          echo "======================================"
-
-          test -f "android-project/settings.gradle"
-          test -f "android-project/build.gradle"
-          test -f "android-project/app/build.gradle"
-          test -f "android-project/app/src/main/AndroidManifest.xml"
-
-          echo ""
-          echo "All required Android files found."
-          echo "Project structure is OK."
-
-      - name: Show GeminiClient
-        shell: bash
-        run: |
-          set -e
-
-          FILE="android-project/app/src/main/java/com/user/agentapp/GeminiClient.kt"
-
-          echo "======================================"
-          echo "CHECKING GEMINICLIENT.KT"
-          echo "======================================"
+          FILE="app/src/main/java/com/user/agentapp/GeminiClient.kt"
 
           if [ -f "$FILE" ]; then
-            nl -ba "$FILE" | sed -n '60,85p'
-          else
-            echo "GeminiClient.kt not found."
-          fi
-
-      - name: Build Debug APK
-        working-directory: android-project
-        shell: bash
-        run: |
-          set -e
-
-          echo "======================================"
-          echo "BUILDING DEBUG APK"
-          echo "======================================"
-
-          gradle assembleDebug \
-            --no-daemon \
-            --stacktrace
-
-      - name: Verify APK
-        shell: bash
-        run: |
-          set -e
-
-          echo "======================================"
-          echo "SEARCHING FOR APK"
-          echo "======================================"
-
-          find android-project/app/build/outputs \
-            -type f \
-            -name "*.apk" \
-            -print
-
-          APK=$(find android-project/app/build/outputs \
-            -type f \
-            -name "*.apk" \
-            | head -n 1)
-
-          if [ -z "$APK" ]; then
-            echo "ERROR: APK WAS NOT GENERATED"
-            exit 1
-          fi
-
-          echo ""
-          echo "APK FOUND:"
-          echo "$APK"
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: Agent-Debug-APK
-          path: android-project/app/build/outputs/apk/debug/*.apk
-          if-no-files-found: error
+            echo "GeminiClient.kt found."
+            echo ""
+            echo "Relevant
