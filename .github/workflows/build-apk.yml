@@ -42,18 +42,41 @@ jobs:
 
           if [ ! -f "$ZIP" ]; then
             echo "ERROR: ZIP NOT FOUND"
+            echo "Files in repository:"
             ls -la
             exit 1
           fi
 
           rm -rf android-project
-          mkdir android-project
+          mkdir -p android-project
 
           unzip -o "$ZIP" -d android-project
 
           echo ""
-          echo "Android project:"
+          echo "Extracted files:"
           find android-project -maxdepth 4 -type f | sort
+
+      - name: Find Android project
+        shell: bash
+        run: |
+          set -e
+
+          echo "======================================"
+          echo "FINDING ANDROID PROJECT"
+          echo "======================================"
+
+          if [ -f "android-project/settings.gradle" ]; then
+            echo "Android project found."
+          elif [ -f "android-project/AgentApp/settings.gradle" ]; then
+            echo "Android project found inside AgentApp."
+            mv android-project/AgentApp/* android-project/
+            mv android-project/AgentApp/.[!.]* android-project/ 2>/dev/null || true
+            rmdir android-project/AgentApp 2>/dev/null || true
+          else
+            echo "ERROR: settings.gradle not found."
+            find android-project -name "settings.gradle" -print
+            exit 1
+          fi
 
       - name: Verify Android project
         shell: bash
@@ -61,17 +84,19 @@ jobs:
           set -e
 
           echo "======================================"
-          echo "VERIFYING PROJECT"
+          echo "VERIFYING ANDROID PROJECT"
           echo "======================================"
 
-          test -f android-project/settings.gradle
-          test -f android-project/build.gradle
-          test -f android-project/app/build.gradle
-          test -f android-project/app/src/main/AndroidManifest.xml
+          test -f "android-project/settings.gradle"
+          test -f "android-project/build.gradle"
+          test -f "android-project/app/build.gradle"
+          test -f "android-project/app/src/main/AndroidManifest.xml"
 
-          echo "Android project OK."
+          echo ""
+          echo "All required Android files found."
+          echo "Project structure is OK."
 
-      - name: Force fix GeminiClient
+      - name: Show GeminiClient
         shell: bash
         run: |
           set -e
@@ -82,55 +107,11 @@ jobs:
           echo "CHECKING GEMINICLIENT.KT"
           echo "======================================"
 
-          if [ ! -f "$FILE" ]; then
-            echo "ERROR: GeminiClient.kt not found."
-            exit 1
+          if [ -f "$FILE" ]; then
+            nl -ba "$FILE" | sed -n '60,85p'
+          else
+            echo "GeminiClient.kt not found."
           fi
-
-          echo "Current lines 66-75:"
-          nl -ba "$FILE" | sed -n '66,75p'
-
-          python3 - "$FILE" <<'PY'
-          import sys
-
-          path = sys.argv[1]
-
-          with open(path, "r", encoding="utf-8") as f:
-              text = f.read()
-
-          old = '''                    put(JSONObject().put("inline_data", JSONObject()
-                        .put("mime_type", "image/jpeg")
-                        .put("data", android.util.Base64.encodeToString(screenJpeg, android.util.Base64.NO_WRAP))))
-'''
-
-          new = '''                    val encodedImage = android.util.Base64.encodeToString(
-                        screenJpeg,
-                        android.util.Base64.NO_WRAP
-                    )
-
-                    put(
-                        JSONObject().put(
-                            "inline_data",
-                            JSONObject()
-                                .put("mime_type", "image/jpeg")
-                                .put("data", encodedImage)
-                        )
-                    )
-'''
-
-          if old in text:
-              text = text.replace(old, new)
-          else:
-              print("Original block not found.")
-              print("Checking whether valid replacement is already present...")
-
-          with open(path, "w", encoding="utf-8") as f:
-              f.write(text)
-          PY
-
-          echo ""
-          echo "After fix, lines 66-82:"
-          nl -ba "$FILE" | sed -n '66,82p'
 
       - name: Build Debug APK
         working-directory: android-project
