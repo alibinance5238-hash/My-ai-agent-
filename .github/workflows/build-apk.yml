@@ -29,33 +29,32 @@ jobs:
         with:
           gradle-version: "8.2"
 
-      - name: Find and extract source ZIP
+      - name: Extract source ZIP
         shell: bash
         run: |
           set -e
 
           echo "======================================"
-          echo "FINDING SOURCE ZIP"
+          echo "EXTRACTING SOURCE ZIP"
           echo "======================================"
 
-          ZIP=$(find . -maxdepth 1 -type f -name "*.zip" | head -n 1)
+          ZIP_FILE=$(find . -maxdepth 1 -type f -name "*.zip" | head -n 1)
 
-          if [ -z "$ZIP" ]; then
+          if [ -z "$ZIP_FILE" ]; then
             echo "ERROR: No ZIP file found."
             ls -la
             exit 1
           fi
 
-          echo "ZIP FOUND: $ZIP"
+          echo "ZIP: $ZIP_FILE"
 
           rm -rf android-project
           mkdir -p android-project
 
-          unzip -o "$ZIP" -d android-project
+          unzip -o "$ZIP_FILE" -d android-project
 
           echo ""
-          echo "Extracted structure:"
-          find android-project -maxdepth 5 -type f | sort
+          echo "Extraction completed."
 
       - name: Locate Android project
         shell: bash
@@ -66,14 +65,85 @@ jobs:
           echo "LOCATING ANDROID PROJECT"
           echo "======================================"
 
-          SETTINGS=$(find android-project -type f -name "settings.gradle" | head -n 1)
+          SETTINGS_FILE=$(find android-project -type f -name "settings.gradle" -print -quit)
 
-          if [ -z "$SETTINGS" ]; then
-            echo "ERROR: settings.gradle was not found."
+          if [ -z "$SETTINGS_FILE" ]; then
+            echo "ERROR: settings.gradle not found."
+            echo ""
+            echo "Files found:"
             find android-project -type f | sort
             exit 1
           fi
 
-          PROJECT_DIR=$(dirname "$SETTINGS")
+          PROJECT_DIR=$(dirname "$SETTINGS_FILE")
 
-          echo "Android project found
+          echo "Project directory:"
+          echo "$PROJECT_DIR"
+
+          echo "BUILD_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+      - name: Verify Android project
+        shell: bash
+        run: |
+          set -e
+
+          echo "======================================"
+          echo "VERIFYING ANDROID PROJECT"
+          echo "======================================"
+
+          echo "Build directory:"
+          echo "$BUILD_DIR"
+
+          test -f "$BUILD_DIR/settings.gradle"
+          test -f "$BUILD_DIR/build.gradle"
+          test -f "$BUILD_DIR/app/build.gradle"
+          test -f "$BUILD_DIR/app/src/main/AndroidManifest.xml"
+
+          echo ""
+          echo "ANDROID PROJECT VERIFIED."
+
+      - name: Build Debug APK
+        shell: bash
+        run: |
+          set -e
+
+          echo "======================================"
+          echo "BUILDING DEBUG APK"
+          echo "======================================"
+
+          cd "$BUILD_DIR"
+
+          gradle assembleDebug \
+            --no-daemon \
+            --stacktrace
+
+      - name: Find APK
+        shell: bash
+        run: |
+          set -e
+
+          echo "======================================"
+          echo "SEARCHING FOR APK"
+          echo "======================================"
+
+          APK_FILE=$(find "$BUILD_DIR/app/build/outputs" \
+            -type f \
+            -name "*.apk" \
+            -print -quit)
+
+          if [ -z "$APK_FILE" ]; then
+            echo "ERROR: APK was not generated."
+            exit 1
+          fi
+
+          echo "APK FOUND:"
+          echo "$APK_FILE"
+
+          echo "APK_FILE=$APK_FILE" >> "$GITHUB_ENV"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Agent-Debug-APK
+          path: ${{ env.APK_FILE }}
+          if-no-files-found: error
