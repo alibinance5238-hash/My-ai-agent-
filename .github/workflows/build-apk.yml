@@ -22,128 +22,116 @@ jobs:
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: '17'
 
       - name: Set up Gradle 8.2
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: "8.2"
-
-      - name: Extract source ZIP
-        shell: bash
-        run: |
-          set -e
-
-          echo "======================================"
-          echo "EXTRACTING SOURCE ZIP"
-          echo "======================================"
-
-          ZIP_FILE=$(find . -maxdepth 1 -type f -name "*.zip" | head -n 1)
-
-          if [ -z "$ZIP_FILE" ]; then
-            echo "ERROR: No ZIP file found."
-            ls -la
-            exit 1
-          fi
-
-          echo "ZIP: $ZIP_FILE"
-
-          rm -rf android-project
-          mkdir -p android-project
-
-          unzip -o "$ZIP_FILE" -d android-project
-
-          echo ""
-          echo "Extraction completed."
+          gradle-version: '8.2'
 
       - name: Locate Android project
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
 
           echo "======================================"
           echo "LOCATING ANDROID PROJECT"
           echo "======================================"
 
-          SETTINGS_FILE=$(find android-project -type f -name "settings.gradle" -print -quit)
+          if [ -f "settings.gradle" ] && [ -f "app/build.gradle" ]; then
+            PROJECT_DIR="$PWD"
+            echo "Android project is already at repository root."
+          else
+            rm -rf extracted-source
+            mkdir -p extracted-source
 
-          if [ -z "$SETTINGS_FILE" ]; then
-            echo "ERROR: settings.gradle not found."
-            echo ""
-            echo "Files found:"
-            find android-project -type f | sort
-            exit 1
+            ZIP=""
+            for candidate in *SOURCE*.zip *source*.zip *.zip; do
+              if [ -f "$candidate" ]; then
+                ZIP="$candidate"
+                break
+              fi
+            done
+
+            if [ -z "$ZIP" ]; then
+              echo "ERROR: No Android project found and no ZIP was present."
+              find . -maxdepth 3 -type f | sort
+              exit 1
+            fi
+
+            echo "Extracting: $ZIP"
+            unzip -q -o "$ZIP" -d extracted-source
+
+            PROJECT_SETTINGS="$(find extracted-source -type f -name 'settings.gradle' -print -quit)"
+            if [ -z "$PROJECT_SETTINGS" ]; then
+              echo "ERROR: settings.gradle was not found after extraction."
+              find extracted-source -type f | sort
+              exit 1
+            fi
+
+            PROJECT_DIR="$(dirname "$PROJECT_SETTINGS")"
           fi
 
-          PROJECT_DIR=$(dirname "$SETTINGS_FILE")
-
-          echo "Project directory:"
-          echo "$PROJECT_DIR"
-
-          echo "BUILD_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Android project: $PROJECT_DIR"
+          echo "Project files:"
+          find "$PROJECT_DIR" -maxdepth 4 -type f | sort
 
       - name: Verify Android project
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
+          cd "$PROJECT_DIR"
 
           echo "======================================"
           echo "VERIFYING ANDROID PROJECT"
           echo "======================================"
 
-          echo "Build directory:"
-          echo "$BUILD_DIR"
+          test -f settings.gradle
+          test -f build.gradle
+          test -f app/build.gradle
+          test -f app/src/main/AndroidManifest.xml
+          test -f app/src/main/java/com/user/agentapp/GeminiClient.kt
+          test -f app/src/main/java/com/user/agentapp/VoiceConversationService.kt
 
-          test -f "$BUILD_DIR/settings.gradle"
-          test -f "$BUILD_DIR/build.gradle"
-          test -f "$BUILD_DIR/app/build.gradle"
-          test -f "$BUILD_DIR/app/src/main/AndroidManifest.xml"
-
-          echo ""
-          echo "ANDROID PROJECT VERIFIED."
+          echo "Android project structure OK."
 
       - name: Build Debug APK
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
+          cd "$PROJECT_DIR"
 
           echo "======================================"
           echo "BUILDING DEBUG APK"
           echo "======================================"
 
-          cd "$BUILD_DIR"
+          gradle clean assembleDebug --no-daemon --stacktrace
 
-          gradle assembleDebug \
-            --no-daemon \
-            --stacktrace
-
-      - name: Find APK
+      - name: Verify APK
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
+          cd "$PROJECT_DIR"
 
           echo "======================================"
           echo "SEARCHING FOR APK"
           echo "======================================"
 
-          APK_FILE=$(find "$BUILD_DIR/app/build/outputs" \
-            -type f \
-            -name "*.apk" \
-            -print -quit)
-
-          if [ -z "$APK_FILE" ]; then
+          APK="$(find app/build/outputs/apk/debug -type f -name '*.apk' -print -quit)"
+          if [ -z "$APK" ]; then
             echo "ERROR: APK was not generated."
+            find app/build -type f | sort || true
             exit 1
           fi
 
-          echo "APK FOUND:"
-          echo "$APK_FILE"
-
-          echo "APK_FILE=$APK_FILE" >> "$GITHUB_ENV"
+          echo "APK FOUND: $APK"
+          echo "APK_PATH=$PROJECT_DIR/$APK" >> "$GITHUB_ENV"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Agent-Debug-APK
-          path: ${{ env.APK_FILE }}
+          path: ${{ env.APK_PATH }}
           if-no-files-found: error
+          
