@@ -45,7 +45,7 @@ jobs:
             rm -rf extracted-source
             mkdir -p extracted-source
 
-            ZIP_FILE="$(find . -maxdepth 2 -type f -iname '*.zip' -print -quit)"
+            ZIP_FILE="$(find . -maxdepth 2 -type f -iname '*.zip' -printf '%T@ %p\n' | sort -nr | cut -d' ' -f2- | head -n 1)"
 
             if [ -z "$ZIP_FILE" ]; then
               echo "ERROR: Android project not found."
@@ -88,6 +88,10 @@ jobs:
           test -f app/src/main/java/com/user/agentapp/GeminiClient.kt
           test -f app/src/main/java/com/user/agentapp/CommandExecutor.kt
           test -f app/src/main/java/com/user/agentapp/VoiceConversationService.kt
+
+          echo "Checking Gemini Live model configuration..."
+          grep -q 'gemini-3.8-live' app/src/main/java/com/user/agentapp/VoiceConversationService.kt
+          grep -q 'gemini-3.8-flash' app/src/main/java/com/user/agentapp/GeminiClient.kt
 
           echo "All required files found."
 
