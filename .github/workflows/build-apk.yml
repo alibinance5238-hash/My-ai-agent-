@@ -29,78 +29,72 @@ jobs:
         with:
           gradle-version: '8.2'
 
-      - name: Extract source ZIP and locate Android project
+      - name: Locate Android project
         shell: bash
         run: |
           set -euo pipefail
 
           echo "======================================"
-          echo "EXTRACTING AND LOCATING PROJECT"
+          echo "LOCATING ANDROID PROJECT"
           echo "======================================"
 
-          rm -rf extracted-source
-          mkdir -p extracted-source
+          if [ -f "settings.gradle" ] && [ -f "app/build.gradle" ]; then
+            PROJECT_DIR="$PWD"
+            echo "Project is already at repository root."
+          else
+            rm -rf extracted-source
+            mkdir -p extracted-source
 
-          ZIP=""
-          while IFS= read -r -d '' f; do
-            ZIP="$f"
-            break
-          done < <(find . -maxdepth 2 -type f -iname '*.zip' -print0)
+            ZIP_FILE="$(find . -maxdepth 2 -type f -iname '*.zip' -print -quit)"
 
-          if [ -z "$ZIP" ]; then
-            echo "ERROR: No ZIP file found in repository."
-            find . -maxdepth 3 -type f | sort
-            exit 1
+            if [ -z "$ZIP_FILE" ]; then
+              echo "ERROR: Android project not found."
+              echo "Expected settings.gradle + app/build.gradle at root, or one source ZIP."
+              find . -maxdepth 4 -type f | sort
+              exit 1
+            fi
+
+            echo "Extracting: $ZIP_FILE"
+            unzip -q -o "$ZIP_FILE" -d extracted-source
+
+            SETTINGS_FILE="$(find extracted-source -type f -name 'settings.gradle' -print -quit)"
+
+            if [ -z "$SETTINGS_FILE" ]; then
+              echo "ERROR: settings.gradle not found after extraction."
+              find extracted-source -maxdepth 8 -type f | sort
+              exit 1
+            fi
+
+            PROJECT_DIR="$(dirname "$SETTINGS_FILE")"
           fi
 
-          echo "Using ZIP: $ZIP"
-          unzip -q -o "$ZIP" -d extracted-source
-
-          SETTINGS="$(find extracted-source -type f -name 'settings.gradle' -print -quit)"
-          if [ -z "$SETTINGS" ]; then
-            echo "ERROR: settings.gradle not found."
-            find extracted-source -maxdepth 8 -type f | sort
-            exit 1
-          fi
-
-          PROJECT_DIR="$(dirname "$SETTINGS")"
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "Android project: $PROJECT_DIR"
+          echo "Project directory: $PROJECT_DIR"
 
-          find "$PROJECT_DIR" -maxdepth 8 -type f             \( -name 'settings.gradle' -o -name 'build.gradle' -o -name 'build.gradle.kts'             -o -name 'AndroidManifest.xml' -o -name '*.kt' -o -name '*.java' \) | sort
-
-      - name: Verify Android project
+      - name: Verify project files
         shell: bash
         run: |
           set -euo pipefail
+
           cd "$PROJECT_DIR"
+
+          echo "======================================"
+          echo "VERIFYING PROJECT"
+          echo "======================================"
 
           test -f settings.gradle || test -f settings.gradle.kts
           test -f app/build.gradle || test -f app/build.gradle.kts
           test -f app/src/main/AndroidManifest.xml
+          test -f app/src/main/java/com/user/agentapp/GeminiClient.kt
+          test -f app/src/main/java/com/user/agentapp/CommandExecutor.kt
+          test -f app/src/main/java/com/user/agentapp/VoiceConversationService.kt
 
-          echo "Android project structure is OK."
-
-      - name: Show agent source before build
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$PROJECT_DIR"
-
-          GEMINI="$(find app/src/main/java -type f -name 'GeminiClient.kt' -print -quit || true)"
-
-          if [ -n "$GEMINI" ]; then
-            echo "----- GeminiClient.kt -----"
-            nl -ba "$GEMINI" | sed -n '1,240p'
-            echo "----- END GeminiClient.kt -----"
-          else
-            echo "WARNING: GeminiClient.kt was not found."
-          fi
+          echo "All required files found."
 
       - name: Build Debug APK
         shell: bash
         run: |
-          set -uo pipefail
+          set +e
           cd "$PROJECT_DIR"
 
           echo "======================================"
@@ -108,49 +102,42 @@ jobs:
           echo "======================================"
 
           if [ -x "./gradlew" ]; then
-            BUILD_CMD=(./gradlew clean assembleDebug --no-daemon --stacktrace)
+            ./gradlew clean assembleDebug --no-daemon --stacktrace 2>&1 | tee "$GITHUB_WORKSPACE/build.log"
+            status=${PIPESTATUS[0]}
           else
-            BUILD_CMD=(gradle clean assembleDebug --no-daemon --stacktrace)
+            gradle clean assembleDebug --no-daemon --stacktrace 2>&1 | tee "$GITHUB_WORKSPACE/build.log"
+            status=${PIPESTATUS[0]}
           fi
 
-          set +e
-          "${BUILD_CMD[@]}" 2>&1 | tee "$GITHUB_WORKSPACE/build.log"
-          BUILD_STATUS=${PIPESTATUS[0]}
-          set -e
-
-          if [ "$BUILD_STATUS" -ne 0 ]; then
+          if [ "$status" -ne 0 ]; then
             echo ""
             echo "======================================"
-            echo "IMPORTANT BUILD ERRORS"
+            echo "COMPILATION ERRORS"
             echo "======================================"
-
-            grep -E               '(^e: |error:|ERROR:|FAILURE:|What went wrong|Caused by:|Unresolved reference|Expecting |Type mismatch|Too many arguments)'               "$GITHUB_WORKSPACE/build.log" | tail -n 120 || true
-
+            grep -E '(^e: |error:|Unresolved reference|Expecting |Type mismatch|Const .+initializer)' "$GITHUB_WORKSPACE/build.log" | tail -n 120 || true
             echo ""
             echo "======================================"
-            echo "LAST 160 LOG LINES"
+            echo "LAST BUILD LOG"
             echo "======================================"
             tail -n 160 "$GITHUB_WORKSPACE/build.log"
-
-            exit "$BUILD_STATUS"
+            exit "$status"
           fi
 
       - name: Verify APK
         shell: bash
         run: |
           set -euo pipefail
-          cd "$PROJECT_DIR"
 
-          APK="$(find app/build/outputs -type f -name '*.apk' -print -quit || true)"
+          APK="$(find "$PROJECT_DIR/app/build/outputs" -type f -name '*.apk' -print -quit || true)"
 
           if [ -z "$APK" ]; then
             echo "ERROR: APK was not generated."
-            find app/build -type f | sort || true
+            find "$PROJECT_DIR/app/build" -type f | sort || true
             exit 1
           fi
 
           echo "APK FOUND: $APK"
-          echo "APK_PATH=$PROJECT_DIR/$APK" >> "$GITHUB_ENV"
+          echo "APK_PATH=$APK" >> "$GITHUB_ENV"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
