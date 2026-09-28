@@ -45,7 +45,7 @@ jobs:
             rm -rf extracted-source
             mkdir -p extracted-source
 
-            ZIP_FILE="$(find . -maxdepth 2 -type f -iname '*.zip' -printf '%T@ %p\n' | sort -nr | cut -d' ' -f2- | head -n 1)"
+            ZIP_FILE="$(find . -maxdepth 2 -type f -iname 'My-ai-agent*.zip' ! -iname '*APK*' -printf '%T@ %p\n' | sort -nr | cut -d' ' -f2- | head -n 1)"
 
             if [ -z "$ZIP_FILE" ]; then
               echo "ERROR: Android project not found."
@@ -92,8 +92,12 @@ jobs:
           echo "Checking Gemini Live model configuration..."
           grep -q 'gemini-3.8-live' app/src/main/java/com/user/agentapp/VoiceConversationService.kt
           grep -q 'gemini-3.8-flash' app/src/main/java/com/user/agentapp/GeminiClient.kt
+          grep -q 'inputAudioTranscription' app/src/main/java/com/user/agentapp/VoiceConversationService.kt
+          grep -q 'outputAudioTranscription' app/src/main/java/com/user/agentapp/VoiceConversationService.kt
+          grep -q 'responseModalities' app/src/main/java/com/user/agentapp/VoiceConversationService.kt
+          grep -q 'behavior' app/src/main/java/com/user/agentapp/VoiceConversationService.kt
 
-          echo "All required files found."
+          echo "All required files found and Gemini Live configuration is present."
 
       - name: Build Debug APK
         shell: bash
